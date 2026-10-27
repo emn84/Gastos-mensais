@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Controle Financeiro</title>
+    <title>Controle Financeiro Familiar</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Chart.js CDN -->
@@ -11,6 +11,10 @@
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
     <script>
         tailwind.config = {
             darkMode: ['class', '[data-theme="dark"]'],
@@ -46,21 +50,15 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-xl bg-green-500 text-white flex items-center justify-center font-bold text-xl shadow-md shadow-green-500/20">
-                    <i class="fa-solid fa-wallet"></i>
+                    <i class="fa-solid fa-users"></i>
                 </div>
                 <div>
-                    <h1 class="font-bold text-lg leading-tight text-slate-900 dark:text-white">Controle Financeiro</h1>
-                    <p class="text-xs text-slate-500 dark:text-slate-400">Gastos Diários</p>
+                    <h1 class="font-bold text-lg leading-tight text-slate-900 dark:text-white">Gastos Compartilhados</h1>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">Tempo Real</p>
                 </div>
             </div>
 
             <div class="flex items-center gap-2 sm:gap-3">
-                <!-- Backup Export -->
-                <button type="button" onclick="exportJSON()" title="Baixar Backup" class="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition text-sm flex items-center gap-1.5 border border-slate-200 dark:border-slate-700">
-                    <i class="fa-solid fa-download text-xs"></i>
-                    <span class="hidden sm:inline text-xs font-medium">Backup</span>
-                </button>
-
                 <!-- Export CSV Button -->
                 <button type="button" onclick="exportCSV()" title="Exportar para Excel/CSV" class="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition text-sm flex items-center gap-1.5 border border-slate-200 dark:border-slate-700">
                     <i class="fa-solid fa-file-excel text-green-600 text-xs"></i>
@@ -218,7 +216,7 @@
                 <div class="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm flex-1 flex flex-col overflow-hidden">
                     <div class="p-5 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
                         <h2 class="font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                            <i class="fa-solid fa-list-ul text-green-500"></i> Histórico de Transações
+                            <i class="fa-solid fa-list-ul text-green-500"></i> Histórico Compartilhado
                         </h2>
                         <span id="transaction-count" class="text-xs bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-semibold px-2.5 py-1 rounded-full">
                             0 lançamentos
@@ -252,7 +250,7 @@
             </div>
             <div class="text-center">
                 <h3 class="text-lg font-bold text-slate-900 dark:text-white">Excluir Transação?</h3>
-                <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Essa ação removerá o gasto deste aparelho.</p>
+                <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Essa ação removerá o gasto para todos os celulares.</p>
             </div>
             <div class="flex gap-3 pt-2">
                 <button type="button" onclick="closeDeleteModal()" class="flex-1 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-sm font-semibold rounded-xl transition">Cancelar</button>
@@ -263,7 +261,18 @@
 
     <!-- Application Script -->
     <script>
-        const LOCAL_STORAGE_KEY = 'gastos_diarios_app_data_v5';
+        // COLOQUE A SUA DATABASE URL DO FIREBASE ABAIXO:
+        const firebaseConfig = {
+            databaseURL: "https://console.firebase.google.com/u/0/project/gastos-mensais-9482a/database/gastos-mensais-9482a-default-rtdb/data/~2F"
+        };
+
+        let db = null;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.database();
+        } catch (err) {
+            console.error("Erro ao iniciar Firebase:", err);
+        }
 
         const CATEGORIES = {
             expense: [
@@ -291,25 +300,28 @@
             document.getElementById('date').valueAsDate = new Date();
             updateCategoryOptions();
             populateCategoryFilter();
-            loadFromLocalStorage();
-            render();
+
+            if (db) {
+                listenToCloud();
+            } else {
+                showToast("Erro ao conectar no banco de dados da nuvem", "error");
+            }
         });
 
-        function loadFromLocalStorage() {
-            try {
-                const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
-                transactions = stored ? JSON.parse(stored) : [];
-            } catch (err) {
-                transactions = [];
-            }
-        }
-
-        function saveToLocalStorage() {
-            try {
-                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(transactions));
-            } catch (err) {
-                console.error("Erro ao salvar:", err);
-            }
+        function listenToCloud() {
+            const ref = db.ref('transacoes');
+            ref.on('value', (snapshot) => {
+                const val = snapshot.val();
+                if (val) {
+                    transactions = Object.keys(val).map(k => ({ id: k, ...val[k] }));
+                    transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+                } else {
+                    transactions = [];
+                }
+                render();
+            }, (err) => {
+                console.error("Erro de sincronização:", err);
+            });
         }
 
         function updateCategoryOptions() {
@@ -353,7 +365,6 @@
             }
 
             const newTx = {
-                id: 'tx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
                 description,
                 amount,
                 date,
@@ -362,16 +373,15 @@
                 timestamp: Date.now()
             };
 
-            // Salva imediatamente no armazenamento local do navegador
-            transactions.unshift(newTx);
-            saveToLocalStorage();
-            render();
+            if (db) {
+                db.ref('transacoes').push(newTx);
+            }
 
             document.getElementById('description').value = '';
             document.getElementById('amount').value = '';
             document.getElementById('date').valueAsDate = new Date();
 
-            showToast("Transação registrada com sucesso!", "success");
+            showToast("Transação salva na nuvem!", "success");
         }
 
         function getFilteredTransactions() {
@@ -529,25 +539,10 @@
         }
 
         function deleteTransaction(id) {
-            transactions = transactions.filter(t => t.id !== id);
-            saveToLocalStorage();
-            render();
-            showToast("Transação excluída!", "info");
-        }
-
-        function exportJSON() {
-            if (transactions.length === 0) {
-                showToast("Nenhum dado para exportar", "error");
-                return;
+            if (db) {
+                db.ref('transacoes/' + id).remove();
             }
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(transactions, null, 2));
-            const downloadAnchor = document.createElement('a');
-            downloadAnchor.setAttribute("href", dataStr);
-            downloadAnchor.setAttribute("download", `gastos_backup_${new Date().toISOString().slice(0,10)}.json`);
-            document.body.appendChild(downloadAnchor);
-            downloadAnchor.click();
-            downloadAnchor.remove();
-            showToast("Backup exportado com sucesso!", "success");
+            showToast("Transação excluída!", "info");
         }
 
         function exportCSV() {
@@ -614,7 +609,7 @@
             const icon = type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle';
 
             toast.className = `pointer-events-auto flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-xs font-semibold ${bgClass} transition duration-300 transform translate-y-2 opacity-0`;
-            toast.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${msg}</span>`;
+            toast.innerHTML = `<i class="fa-solid ${icon}"><span>${msg}</span>`;
 
             container.appendChild(toast);
 
